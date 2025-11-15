@@ -1,6 +1,8 @@
+require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const play = require('play-dl');
+const express = require('express');
 
 const client = new Client({
   intents: [
@@ -14,6 +16,11 @@ const client = new Client({
 let connection;
 let player = createAudioPlayer();
 
+// Servidor web para mantener Replit activo
+const app = express();
+app.get('/', (req, res) => res.send('🎶 Master Bot está activo'));
+app.listen(3000, () => console.log('🌐 Servidor web iniciado'));
+
 client.once('ready', () => {
   console.log(`🎶 Master Bot conectado como ${client.user.tag}`);
 });
@@ -21,7 +28,6 @@ client.once('ready', () => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  // !join → unirse al canal de voz
   if (message.content === '!join') {
     if (message.member.voice.channel) {
       connection = joinVoiceChannel({
@@ -35,7 +41,6 @@ client.on('messageCreate', async message => {
     }
   }
 
-  // !play <nombre de canción>
   if (message.content.startsWith('!play')) {
     const query = message.content.replace('!play', '').trim();
     if (!query) return message.reply('⚠️ Escribe el nombre de la canción');
@@ -67,18 +72,16 @@ client.on('messageCreate', async message => {
         message.reply(`▶️ Reproduciendo: **${song.title}**`);
       });
     } catch (error) {
-      console.error('Error al buscar o reproducir:', error);
+      console.error('Error al reproducir:', error);
       message.reply('❌ Hubo un problema al reproducir la canción');
     }
   }
 
-  // !pause → pausa la música
   if (message.content === '!pause') {
     player.pause();
     message.reply('⏸️ Master Bot pausó la música');
   }
 
-  // !stop → detiene y desconecta
   if (message.content === '!stop') {
     player.stop();
     if (connection) {
@@ -89,12 +92,11 @@ client.on('messageCreate', async message => {
   }
 });
 
-// Desconexión automática al terminar
 player.on(AudioPlayerStatus.Idle, () => {
   if (connection) {
     connection.destroy();
     connection = null;
-    console.log('🔌 Master Bot se desconectó automáticamente al terminar la música');
+    console.log('🔌 Master Bot se desconectó automáticamente');
   }
 });
 
