@@ -10,13 +10,13 @@ const {
   StringSelectMenuOptionBuilder,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  AudioPlayerStatus
 } = require('discord.js');
 const {
   joinVoiceChannel,
   createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus
+  createAudioResource
 } = require('@discordjs/voice');
 const play = require('play-dl');
 
@@ -39,13 +39,12 @@ function getQueue(guildId) {
     const queue = { player, connection: null };
     queues.set(guildId, queue);
 
-    // 🔍 Logs para verificar estados del reproductor
     player.on(AudioPlayerStatus.Playing, () => {
       console.log('▶️ El audio está reproduciéndose');
     });
 
     player.on(AudioPlayerStatus.Idle, () => {
-      console.log('⏹️ El reproductor está en Idle (terminó la canción)');
+      console.log('⏹️ El reproductor está en Idle');
     });
 
     player.on(AudioPlayerStatus.Paused, () => {
