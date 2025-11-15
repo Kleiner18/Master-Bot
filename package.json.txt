@@ -1,0 +1,14 @@
+{
+  "name": "master-bot",
+  "version": "1.0.0",
+  "description": "Master Bot - Bot musical para Discord",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "@discordjs/voice": "^0.16.0",
+    "play-dl": "^1.9.7"
+  }
+}
