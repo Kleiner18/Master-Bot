@@ -90,3 +90,4 @@ player.on(AudioPlayerStatus.Idle, () => {
 });
 
 client.login(process.env.TOKEN);
+
