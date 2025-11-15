@@ -16,17 +16,3 @@ Permite unirse a canales de voz, reproducir música desde YouTube, pausar y dete
 
 ---
 
-## 🛠️ Requisitos
-
-- Node.js v16 o superior
-- Una cuenta en [Discord Developer Portal](https://discord.com/developers/applications) con un bot creado
-- Token del bot (guárdalo en una variable de entorno `TOKEN`)
-
----
-
-## 📂 Instalación
-
-1. Clona este repositorio:
-   ```bash
-   git clone https://github.com/tuusuario/master-bot.git
-   cd master-bot
