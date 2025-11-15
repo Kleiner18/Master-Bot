@@ -1,95 +1,207 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
+const {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  REST,
+  Routes,
+  SlashCommandBuilder,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
+} = require('discord.js');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus
+} = require('@discordjs/voice');
 const play = require('play-dl');
-const express = require('express');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates
-  ]
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Channel]
 });
 
-let connection;
-let player = createAudioPlayer();
+const queues = new Map();
+const searchCache = new Map();
 
-// Servidor web para mantener Replit activo
-const app = express();
-app.get('/', (req, res) => res.send('🎶 Master Bot está activo'));
-app.listen(3000, () => console.log('🌐 Servidor web iniciado'));
+function getQueue(guildId) {
+  if (!queues.has(guildId)) {
+    const player = createAudioPlayer();
+    const queue = { player, connection: null };
+    queues.set(guildId, queue);
+
+    // 🔍 Logs para verificar estados del reproductor
+    player.on(AudioPlayerStatus.Playing, () => {
+      console.log('▶️ El audio está reproduciéndose');
+    });
+
+    player.on(AudioPlayerStatus.Idle, () => {
+      console.log('⏹️ El reproductor está en Idle (terminó la canción)');
+    });
+
+    player.on(AudioPlayerStatus.Paused, () => {
+      console.log('⏸️ El audio está en pausa');
+    });
+
+    player.on('error', err => console.error('❌ Error en el reproductor:', err));
+  }
+  return queues.get(guildId);
+}
+
+async function ensureConnection(interaction, queue) {
+  const channel = interaction.member?.voice?.channel;
+  if (!channel) {
+    await interaction.reply({ content: '⚠️ Debes estar en un canal de voz.', ephemeral: true });
+    return false;
+  }
+  if (!queue.connection) {
+    queue.connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: interaction.guild.id,
+      adapterCreator: interaction.guild.voiceAdapterCreator
+    });
+    queue.connection.subscribe(queue.player);
+    console.log('🔗 Conectado y suscrito al canal de voz');
+  }
+  return true;
+}
+
+function controlButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('pause').setLabel('⏸️ Pausar').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('skip').setLabel('⏭️ Saltar').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('stop').setLabel('🛑 Detener').setStyle(ButtonStyle.Danger)
+  );
+}
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('play')
+    .setDescription('Buscar y reproducir una canción')
+    .addStringOption(opt =>
+      opt.setName('query')
+        .setDescription('Nombre de la canción')
+        .setRequired(true)
+    )
+].map(cmd => cmd.toJSON());
+
+const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+(async () => {
+  try {
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
+    console.log('✅ Comandos registrados');
+  } catch (err) {
+    console.error('❌ Error registrando comandos:', err);
+  }
+})();
 
 client.once('ready', () => {
   console.log(`🎶 Master Bot conectado como ${client.user.tag}`);
 });
 
-client.on('messageCreate', async message => {
-  if (message.author.bot) return;
+client.on('interactionCreate', async interaction => {
+  // --- Comando /play ---
+  if (interaction.isChatInputCommand() && interaction.commandName === 'play') {
+    await interaction.deferReply();
 
-  // !join → unirse al canal de voz
-  if (message.content === '!join') {
-    if (message.member.voice.channel) {
-      connection = joinVoiceChannel({
-        channelId: message.member.voice.channel.id,
-        guildId: message.guild.id,
-        adapterCreator: message.guild.voiceAdapterCreator
-      });
-      message.reply('✅ Master Bot se unió a tu canal de voz');
-    } else {
-      message.reply('⚠️ Debes estar en un canal de voz');
+    const query = interaction.options.getString('query');
+    const results = await play.search(query, { limit: 10 });
+    if (!results || results.length === 0) {
+      return interaction.editReply({ content: '📭 No se encontraron resultados.' });
     }
+
+    const options = results.map((song, i) =>
+      new StringSelectMenuOptionBuilder()
+        .setLabel(song.title.slice(0, 100))
+        .setDescription(song.durationRaw || 'Duración desconocida')
+        .setValue(String(i))
+    );
+
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId('select_song')
+      .setPlaceholder('Selecciona una canción')
+      .addOptions(options);
+
+    searchCache.set(interaction.user.id, results);
+
+    await interaction.editReply({
+      content: `🎶 Resultados para: **${query}**`,
+      components: [new ActionRowBuilder().addComponents(menu), controlButtons()]
+    });
   }
 
-  // !play <nombre de canción o artista>
-  if (message.content.startsWith('!play')) {
-    const query = message.content.replace('!play', '').trim();
-    if (!query) return message.reply('⚠️ Escribe el nombre de la canción');
-    if (!connection) return message.reply('⚠️ Usa primero !join para que me conecte');
+  // --- Selección directa sin cola ---
+  if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
+    await interaction.deferReply();
+
+    const index = parseInt(interaction.values[0]);
+    const results = searchCache.get(interaction.user.id);
+
+    if (!results || !results[index]) {
+      return interaction.editReply({ content: '❌ Selección inválida o expirada.' });
+    }
+
+    const song = results[index];
+    const queue = getQueue(interaction.guild.id);
+    const ok = await ensureConnection(interaction, queue);
+    if (!ok) return;
 
     try {
-      // Buscar solo el primer resultado
-      let results = await play.search(query, { limit: 1 });
-      if (results.length === 0) return message.reply('❌ No encontré resultados');
-
-      let song = results[0];
-      let stream = await play.stream(song.url);
-      let resource = createAudioResource(stream.stream, { inputType: stream.type });
-
-      player.play(resource);
-      connection.subscribe(player);
-
-      message.reply(`▶️ Reproduciendo: **${song.title}**`);
+      const stream = await play.stream(song.url);
+      if (!stream || !stream.stream) {
+        return interaction.editReply({ content: '❌ No se pudo obtener el audio del video.' });
+      }
+      const resource = createAudioResource(stream.stream, { inputType: stream.type });
+      queue.player.play(resource);
+      console.log(`🎧 Reproduciendo: ${song.title}`);
+      return interaction.editReply({
+        content: `▶️ Reproduciendo directamente: **${song.title}**`,
+        components: [controlButtons()]
+      });
     } catch (error) {
-      console.error('Error al reproducir:', error);
-      message.reply('❌ Hubo un problema al reproducir la canción');
+      console.error('❌ Error en play.stream:', error);
+      return interaction.editReply({ content: '❌ Error al reproducir la canción.' });
     }
   }
 
-  // !pause → pausa la música
-  if (message.content === '!pause') {
-    player.pause();
-    message.reply('⏸️ Master Bot pausó la música');
-  }
+  // --- Botones de control ---
+  if (interaction.isButton()) {
+    const queue = getQueue(interaction.guild.id);
+    const ok = await ensureConnection(interaction, queue);
+    if (!ok) return;
 
-  // !stop → detiene y desconecta
-  if (message.content === '!stop') {
-    player.stop();
-    if (connection) {
-      connection.destroy();
-      connection = null;
+    if (interaction.customId === 'pause') {
+      if (queue.player.state.status === AudioPlayerStatus.Playing) {
+        queue.player.pause();
+        return interaction.reply({ content: '⏸️ Pausado.' });
+      } else {
+        queue.player.unpause();
+        return interaction.reply({ content: '▶️ Reanudado.' });
+      }
     }
-    message.reply('🛑 Master Bot detuvo la música y salió del canal');
-  }
-});
 
-// Desconexión automática al terminar
-player.on(AudioPlayerStatus.Idle, () => {
-  if (connection) {
-    connection.destroy();
-    connection = null;
-    console.log('🔌 Master Bot se desconectó automáticamente');
+    if (interaction.customId === 'skip') {
+      queue.player.stop();
+      return interaction.reply({ content: '⏭️ Canción saltada.' });
+    }
+
+    if (interaction.customId === 'stop') {
+      queue.player.stop();
+      if (queue.connection) {
+        queue.connection.destroy();
+        queue.connection = null;
+      }
+      return interaction.reply({ content: '🛑 Reproducción detenida.' });
+    }
   }
 });
 
