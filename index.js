@@ -21,11 +21,9 @@ const {
     createAudioResource
 } = require('@discordjs/voice');
 const play = require('play-dl');
-const ffmpegStatic = require('ffmpeg-static'); // Importa el binario estático de FFmpeg
 
-// 🔑 Paso CRÍTICO: Configurar play-dl para usar el binario de FFmpeg estático
-play.setFFmpegPath(ffmpegStatic);
-console.log('✅ play-dl configurado para usar ffmpeg-static.');
+// NOTA: Eliminamos la configuración de play.setFFmpegPath(ffmpegStatic)
+// para que play-dl use el binario de FFmpeg que instalamos en Render.
 
 // --- Configuración Inicial del Cliente ---
 
@@ -134,7 +132,6 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply();
 
         const query = interaction.options.getString('query');
-        // Usamos search para obtener una lista de resultados
         const results = await play.search(query, { limit: 10 }); 
         if (!results || results.length === 0) {
             return interaction.editReply({ content: '📭 No se encontraron resultados.' });
@@ -152,7 +149,6 @@ client.on('interactionCreate', async interaction => {
             .setPlaceholder('Selecciona una canción')
             .addOptions(options);
 
-        // Guardamos los resultados para usarlos cuando el usuario seleccione
         searchCache.set(interaction.user.id, results); 
 
         await interaction.editReply({
@@ -163,7 +159,6 @@ client.on('interactionCreate', async interaction => {
 
     // --- Manejo de la selección de canción ---
     if (interaction.isStringSelectMenu() && interaction.customId === 'select_song') {
-        // Usa deferUpdate para que el menú no siga cargando
         await interaction.deferUpdate(); 
 
         const index = parseInt(interaction.values[0]);
@@ -179,7 +174,6 @@ client.on('interactionCreate', async interaction => {
         if (!ok) return;
 
         try {
-            // Usa play.stream para obtener un stream compatible con FFmpeg
             const stream = await play.stream(song.url); 
             if (!stream || !stream.stream) {
                 return interaction.followUp({ content: '❌ No se pudo obtener el audio del video.', ephemeral: true });
@@ -188,24 +182,24 @@ client.on('interactionCreate', async interaction => {
             // Crea el recurso de audio usando el stream y el tipo que play-dl proporciona
             const resource = createAudioResource(stream.stream, { inputType: stream.type });
             
-            // 🎧 La reproducción real sucede aquí
             queue.player.play(resource); 
             
             console.log(`🎧 Reproduciendo: ${song.title}`);
-            return interaction.editReply({ // Edita el mensaje original con el resultado
+            return interaction.editReply({ 
                 content: `▶️ Reproduciendo ahora: **${song.title}**`,
                 components: [controlButtons()]
             });
             
         } catch (error) {
             console.error('❌ Error en play.stream:', error);
-            return interaction.followUp({ content: '❌ Error al reproducir la canción.', ephemeral: true });
+            // El error 'No se encuentra ffmpeg' aparecerá aquí si el build falla.
+            return interaction.followUp({ content: '❌ Error al reproducir la canción. Verifica que FFmpeg se haya instalado correctamente en el servidor.', ephemeral: true });
         }
     }
 
     // --- Manejo de Botones de Control ---
     if (interaction.isButton()) {
-        await interaction.deferReply({ ephemeral: true }); // Respuesta temporal
+        await interaction.deferReply({ ephemeral: true }); 
         const queue = getQueue(interaction.guild.id);
         
         if (interaction.customId === 'pause') {
@@ -221,7 +215,6 @@ client.on('interactionCreate', async interaction => {
         }
 
         if (interaction.customId === 'skip') {
-            // queue.player.stop() mueve el estado a Idle, lo que es útil para colas.
             queue.player.stop(); 
             return interaction.editReply({ content: '⏭️ Canción saltada (si hubiera cola).' });
         }
@@ -229,7 +222,6 @@ client.on('interactionCreate', async interaction => {
         if (interaction.customId === 'stop') {
             queue.player.stop();
             if (queue.connection) {
-                // Destruye la conexión para desconectar el bot del canal
                 queue.connection.destroy(); 
                 queue.connection = null;
             }
