@@ -47,30 +47,17 @@ client.on('messageCreate', async message => {
     if (!connection) return message.reply('⚠️ Usa primero !join para que me conecte');
 
     try {
-      let results = await play.search(query, { limit: 5 });
+      let results = await play.search(query, { limit: 1 });
       if (results.length === 0) return message.reply('❌ No encontré resultados');
 
-      let options = results.map((r, i) => `${i + 1}. ${r.title}`).join('\n');
-      await message.reply(`🎵 Master Bot encontró estas opciones:\n${options}\n\nEscribe el número para elegir.`);
+      let song = results[0];
+      let stream = await play.stream(song.url);
+      let resource = createAudioResource(stream.stream, { inputType: stream.type });
 
-      const filter = m => m.author.id === message.author.id;
-      const collector = message.channel.createMessageCollector({ filter, time: 15000, max: 1 });
+      player.play(resource);
+      connection.subscribe(player);
 
-      collector.on('collect', async m => {
-        let choice = parseInt(m.content);
-        if (isNaN(choice) || choice < 1 || choice > results.length) {
-          return message.reply('⚠️ Número inválido');
-        }
-
-        let song = results[choice - 1];
-        let stream = await play.stream(song.url);
-        let resource = createAudioResource(stream.stream, { inputType: stream.type });
-
-        player.play(resource);
-        connection.subscribe(player);
-
-        message.reply(`▶️ Reproduciendo: **${song.title}**`);
-      });
+      message.reply(`▶️ Reproduciendo: **${song.title}**`);
     } catch (error) {
       console.error('Error al reproducir:', error);
       message.reply('❌ Hubo un problema al reproducir la canción');
