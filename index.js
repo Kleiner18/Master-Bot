@@ -28,6 +28,7 @@ client.once('ready', () => {
 client.on('messageCreate', async message => {
   if (message.author.bot) return;
 
+  // !join → unirse al canal de voz
   if (message.content === '!join') {
     if (message.member.voice.channel) {
       connection = joinVoiceChannel({
@@ -41,12 +42,14 @@ client.on('messageCreate', async message => {
     }
   }
 
+  // !play <nombre de canción o artista>
   if (message.content.startsWith('!play')) {
     const query = message.content.replace('!play', '').trim();
     if (!query) return message.reply('⚠️ Escribe el nombre de la canción');
     if (!connection) return message.reply('⚠️ Usa primero !join para que me conecte');
 
     try {
+      // Buscar solo el primer resultado
       let results = await play.search(query, { limit: 1 });
       if (results.length === 0) return message.reply('❌ No encontré resultados');
 
@@ -64,11 +67,13 @@ client.on('messageCreate', async message => {
     }
   }
 
+  // !pause → pausa la música
   if (message.content === '!pause') {
     player.pause();
     message.reply('⏸️ Master Bot pausó la música');
   }
 
+  // !stop → detiene y desconecta
   if (message.content === '!stop') {
     player.stop();
     if (connection) {
@@ -79,6 +84,7 @@ client.on('messageCreate', async message => {
   }
 });
 
+// Desconexión automática al terminar
 player.on(AudioPlayerStatus.Idle, () => {
   if (connection) {
     connection.destroy();
